@@ -113,11 +113,13 @@ class Korpus(val baseDir: String) {
 data class FeatureUsage(val project: String, val file: String?, val line: Int)
 
 class FeatureUsageCounter(val name: String, val trackUsages: Boolean = false) {
+    val projects = hashSetOf<String>()
     val usages = arrayListOf<FeatureUsage>()
     var count = 0
 
     fun increment(projectPath: String, usage: PsiElement) {
         count++
+        projects.add(projectPath)
         if (trackUsages) {
             val path = usage.getContainingFile()?.getVirtualFile()?.getPath()
             val doc = PsiDocumentManager.getInstance(usage.getProject()).getDocument(usage.getContainingFile())
@@ -127,7 +129,7 @@ class FeatureUsageCounter(val name: String, val trackUsages: Boolean = false) {
     }
 
     fun report() {
-        println("$name: $count")
+        println("$name: $count in ${projects.size()} projects")
         usages.forEach {
             println("  Project: ${it.project}; path: ${it.file}:${it.line}")
         }
