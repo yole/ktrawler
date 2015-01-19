@@ -24,6 +24,16 @@ import org.jetbrains.kotlin.psi.JetLabeledExpression
 import org.jetbrains.kotlin.psi.JetContinueExpression
 import org.jetbrains.kotlin.psi.JetReturnExpression
 import org.jetbrains.kotlin.psi.JetWhenExpression
+import org.jetbrains.kotlin.psi.JetWhenConditionInRange
+import org.jetbrains.kotlin.psi.JetWhileExpression
+import org.jetbrains.kotlin.psi.JetDoWhileExpression
+import org.jetbrains.kotlin.psi.JetObjectDeclaration
+import org.jetbrains.kotlin.psi.JetProperty
+import org.jetbrains.kotlin.psi.JetEnumEntry
+import org.jetbrains.kotlin.psi.JetTypeParameter
+import org.jetbrains.kotlin.types.Variance
+import org.jetbrains.kotlin.psi.JetTypeProjection
+import org.jetbrains.kotlin.psi.JetProjectionKind
 
 data class KotlinProject(val rootPath: String)
 
@@ -43,7 +53,7 @@ class GithubRepositoryCollector() {
     val github = restAdapter.create(javaClass<Github>())
 
     fun processAllKotlinRepositories(callback: (Repo) -> Boolean) {
-        var currentPage = 0
+        var currentPage = 1
         var totalCount = -1
         var processedCount = 0
         while (totalCount == -1 || processedCount < totalCount) {
@@ -124,24 +134,43 @@ class FeatureUsageCounter(val name: String, val trackUsages: Boolean = false) {
     }
 }
 
-class Ktrawler(): JetTreeVisitorVoid() {
+class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     var currentRepo: String? = null
     var repositoriesAnalyzed = 0
     var filesAnalyzed = 0
-    val syntaxErrors = FeatureUsageCounter("Error count", true)
-    val delegationBySpecifiers = FeatureUsageCounter("'by' delegations", true)
+    var linesAnalyzed = 0
+    val syntaxErrors = FeatureUsageCounter("Error count", !statsOnly)
+    val delegationBySpecifiers = FeatureUsageCounter("'by' delegations", !statsOnly)
     val classes = FeatureUsageCounter("Classes")
+    val innerClasses = FeatureUsageCounter("Inner classes")
     val classObjects = FeatureUsageCounter("Class objects")
+    val objects = FeatureUsageCounter("Object declarations")
+    val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
+    val enums = FeatureUsageCounter("Enum classes")
+    val enumsWithConstructorParameters = FeatureUsageCounter("Enum classes with constructor parameters")
+    val enumEntries = FeatureUsageCounter("Enum entries")
+    val enumEntriesWithBody = FeatureUsageCounter("Enum entries with body")
     val functions = FeatureUsageCounter("Functions")
     val extensionFunctions = FeatureUsageCounter("Extension functions")
     val extensionFunctionsInClasses = FeatureUsageCounter("Extension functions inside classes")
     val lambdas = FeatureUsageCounter("Lambdas")
-    val lambdasWithDeclaredReturnType = FeatureUsageCounter("Lambdas with declared return type", true)
-    val labeledExpressions = FeatureUsageCounter("Labeled expressions", true)
-    val qualifiedBreakContinue = FeatureUsageCounter("'break' or 'continue' with label", true)
-    val returnWithLabel = FeatureUsageCounter("'return' with label", true)
+    val lambdasWithDeclaredReturnType = FeatureUsageCounter("Lambdas with declared return type", !statsOnly)
+    val labeledExpressions = FeatureUsageCounter("Labeled expressions", !statsOnly)
+    val qualifiedBreakContinue = FeatureUsageCounter("'break' or 'continue' with label", !statsOnly)
+    val returnWithLabel = FeatureUsageCounter("'return' with label", !statsOnly)
+    val whileLoops = FeatureUsageCounter("'while' loops")
+    val doWhileLoops = FeatureUsageCounter("'do/while' loops")
     val whenWithExpression = FeatureUsageCounter("'when' with expression")
     val whenWithoutExpression = FeatureUsageCounter("'when' without expression")
+    val whenConditionInRange = FeatureUsageCounter("'in' condition in 'when'")
+    val primaryConstructorVisibility = FeatureUsageCounter("Primary constructors with non-default visibility")
+    val vals = FeatureUsageCounter("'val' declarations")
+    val vars = FeatureUsageCounter("'var' declarations")
+    val typeParameters = FeatureUsageCounter("Type parameters")
+    val typeParametersWithVariance = FeatureUsageCounter("Type parameters with variance")
+    val typeArguments = FeatureUsageCounter("Type arguments")
+    val typeArgumentsWithVariance = FeatureUsageCounter("Type arguments with variance")
+    val typeArgumentsWithStar = FeatureUsageCounter("Type arguments with <*>")
 
     fun analyzeRepository(rootPath: String) {
         currentRepo = rootPath
@@ -154,8 +183,11 @@ class Ktrawler(): JetTreeVisitorVoid() {
         configuration.add(CommonConfigurationKeys.SOURCE_ROOTS_KEY, rootPath)
         val environment = JetCoreEnvironment.createForProduction(root, configuration, EnvironmentConfigFiles.JVM_CONFIG_FILES)
         environment.getSourceFiles().forEach {
-            filesAnalyzed++
-            it.acceptChildren(this)
+            if ("/testData/" !in it.getVirtualFile().getPath()) {
+                filesAnalyzed++
+                linesAnalyzed += PsiDocumentManager.getInstance(it.getProject()).getDocument(it).getLineCount()
+                it.acceptChildren(this)
+            }
         }
         Disposer.dispose(root)
     }
@@ -170,8 +202,36 @@ class Ktrawler(): JetTreeVisitorVoid() {
     override fun visitClass(klass: JetClass) {
         super.visitClass(klass)
         classes.increment(klass)
+        if (klass.isInner()) {
+            innerClasses.increment(klass)
+        }
         if (klass.getClassObject() != null) {
             classObjects.increment(klass.getClassObject())
+        }
+        if (klass.getPrimaryConstructorModifierList() != null) {
+            primaryConstructorVisibility.increment(klass)
+        }
+        if (klass.isEnum()) {
+            enums.increment(klass)
+            if (klass.getPrimaryConstructorParameters().size() > 0) {
+                enumsWithConstructorParameters.increment(klass)
+            }
+        }
+    }
+
+    override fun visitEnumEntry(enumEntry: JetEnumEntry) {
+        super.visitEnumEntry(enumEntry)
+        enumEntries.increment(enumEntry)
+        if (enumEntry.getBody() != null) {
+            enumEntriesWithBody.increment(enumEntry)
+        }
+    }
+
+    override fun visitObjectDeclaration(declaration: JetObjectDeclaration) {
+        super.visitObjectDeclaration(declaration)
+        objects.increment(declaration)
+        if (declaration.isTopLevel()) {
+            topLevelObjects.increment(declaration)
         }
     }
 
@@ -225,6 +285,16 @@ class Ktrawler(): JetTreeVisitorVoid() {
         }
     }
 
+    override fun visitWhileExpression(expression: JetWhileExpression) {
+        super.visitWhileExpression(expression)
+        whileLoops.increment(expression)
+    }
+
+    override fun visitDoWhileExpression(expression: JetDoWhileExpression) {
+        super.visitDoWhileExpression(expression)
+        doWhileLoops.increment(expression)
+    }
+
     override fun visitWhenExpression(expression: JetWhenExpression) {
         super.visitWhenExpression(expression)
         if (expression.getSubjectExpression() != null) {
@@ -234,13 +304,53 @@ class Ktrawler(): JetTreeVisitorVoid() {
         }
     }
 
+    override fun visitWhenConditionInRange(condition: JetWhenConditionInRange) {
+        super.visitWhenConditionInRange(condition)
+        whenConditionInRange.increment(condition)
+    }
+
+    override fun visitProperty(property: JetProperty) {
+        super.visitProperty(property)
+        if (property.isVar()) {
+            vars.increment(property)
+        } else {
+            vals.increment(property)
+        }
+    }
+
+    override fun visitTypeParameter(parameter: JetTypeParameter) {
+        super.visitTypeParameter(parameter)
+        typeParameters.increment(parameter)
+        if (parameter.getVariance() != Variance.INVARIANT) {
+            typeParametersWithVariance.increment(parameter)
+        }
+    }
+
+    override fun visitTypeProjection(typeProjection: JetTypeProjection) {
+        super.visitTypeProjection(typeProjection)
+        typeArguments.increment(typeProjection)
+        when (typeProjection.getProjectionKind()) {
+            JetProjectionKind.IN, JetProjectionKind.OUT -> typeArgumentsWithVariance.increment(typeProjection)
+            JetProjectionKind.STAR -> typeArgumentsWithStar.increment(typeProjection)
+        }
+    }
+
     fun report() {
         println("Repositories analyzed: $repositoriesAnalyzed")
         println("Files analyzed: $filesAnalyzed")
+        println("Lines analyzed: $linesAnalyzed")
         syntaxErrors.report()
         delegationBySpecifiers.report()
         classes.report()
         classObjects.report()
+        primaryConstructorVisibility.report()
+        innerClasses.report()
+        objects.report()
+        topLevelObjects.report()
+        enums.report()
+        enumsWithConstructorParameters.report()
+        enumEntries.report()
+        enumEntriesWithBody.report()
         functions.report()
         extensionFunctions.report()
         extensionFunctionsInClasses.report()
@@ -249,19 +359,31 @@ class Ktrawler(): JetTreeVisitorVoid() {
         labeledExpressions.report()
         qualifiedBreakContinue.report()
         returnWithLabel.report()
+        whileLoops.report()
+        doWhileLoops.report()
         whenWithExpression.report()
         whenWithoutExpression.report()
+        whenConditionInRange.report()
+        vals.report()
+        vars.report()
+        typeParameters.report()
+        typeParametersWithVariance.report()
+        typeArguments.report()
+        typeArgumentsWithVariance.report()
+        typeArgumentsWithStar.report()
     }
 }
 
 fun main(args: Array<String>) {
     if (args.size() == 0) {
-        println("Usage: ktrawler <corpus-directory-path> [<max-repo-count>]")
+        println("Usage: ktrawler <corpus-directory-path> [-stats-only] [<max-repo-count>]")
         return
     }
     val korpus = Korpus(args[0])
-    val maxCount = if (args.size() == 2) Integer.parseInt(args[1]) else 1000000
-    val ktrawler = Ktrawler()
+    var arg = 1
+    val statsOnly = if (args.size() > 1 && args[1] == "-stats-only") { arg++; true } else false
+    val maxCount = if (args.size() > arg) Integer.parseInt(args[arg]) else 1000000
+    val ktrawler = Ktrawler(statsOnly)
     var reposProcessed = 0
 
     val excludedRepos = File("excludedRepos.txt")
