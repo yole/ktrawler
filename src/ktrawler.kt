@@ -34,8 +34,7 @@ import org.jetbrains.kotlin.psi.JetTypeParameter
 import org.jetbrains.kotlin.types.Variance
 import org.jetbrains.kotlin.psi.JetTypeProjection
 import org.jetbrains.kotlin.psi.JetProjectionKind
-
-data class KotlinProject(val rootPath: String)
+import org.jetbrains.kotlin.lexer.JetModifierKeywordToken
 
 data class Repo(val full_name: String, val git_url: String)
 
@@ -153,6 +152,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val enumEntries = FeatureUsageCounter("Enum entries")
     val enumEntriesWithBody = FeatureUsageCounter("Enum entries with body")
     val functions = FeatureUsageCounter("Functions")
+    val inlineFunctions = FeatureUsageCounter("Inline functions")
     val extensionFunctions = FeatureUsageCounter("Extension functions")
     val extensionFunctionsInClasses = FeatureUsageCounter("Extension functions inside classes")
     val lambdas = FeatureUsageCounter("Lambdas")
@@ -240,6 +240,9 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     override fun visitNamedFunction(function: JetNamedFunction) {
         super.visitNamedFunction(function)
         functions.increment(function)
+        if (function.getAnnotationEntries().any { it.getCalleeExpression().getText() == "inline" }) {
+            inlineFunctions.increment(function)
+        }
         if (function.getReceiverTypeReference() != null) {
             extensionFunctions.increment(function)
             if (PsiTreeUtil.getParentOfType(function, javaClass<JetClass>()) != null) {
@@ -354,6 +357,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         enumEntries.report()
         enumEntriesWithBody.report()
         functions.report()
+        inlineFunctions.report()
         extensionFunctions.report()
         extensionFunctionsInClasses.report()
         lambdas.report()
