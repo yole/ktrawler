@@ -34,7 +34,8 @@ import org.jetbrains.kotlin.psi.JetTypeParameter
 import org.jetbrains.kotlin.types.Variance
 import org.jetbrains.kotlin.psi.JetTypeProjection
 import org.jetbrains.kotlin.psi.JetProjectionKind
-import org.jetbrains.kotlin.lexer.JetModifierKeywordToken
+import org.jetbrains.kotlin.psi.JetBinaryExpression
+import org.jetbrains.kotlin.lexer.JetTokens
 
 data class Repo(val full_name: String, val git_url: String)
 
@@ -173,6 +174,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val typeArguments = FeatureUsageCounter("Type arguments")
     val typeArgumentsWithVariance = FeatureUsageCounter("Type arguments with variance")
     val typeArgumentsWithStar = FeatureUsageCounter("Type arguments with <*>")
+    val rangeOperators = FeatureUsageCounter("Range operators")
 
     fun analyzeRepository(rootPath: String) {
         currentRepo = rootPath
@@ -340,6 +342,13 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         }
     }
 
+    override fun visitBinaryExpression(expression: JetBinaryExpression) {
+        super.visitBinaryExpression(expression)
+        if (expression.getOperationToken() == JetTokens.RANGE) {
+            rangeOperators.increment(expression)
+        }
+    }
+
     fun report() {
         println("Repositories analyzed: $repositoriesAnalyzed")
         println("Files analyzed: $filesAnalyzed")
@@ -377,6 +386,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         typeArguments.report()
         typeArgumentsWithVariance.report()
         typeArgumentsWithStar.report()
+        rangeOperators.report()
     }
 }
 
