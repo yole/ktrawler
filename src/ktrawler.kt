@@ -1,41 +1,22 @@
 package org.jetbrains.ktrawler
 
-import org.jetbrains.kotlin.psi.JetTreeVisitorVoid
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.Disposer
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiErrorElement
+import com.intellij.psi.util.PsiTreeUtil
+import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
+import org.jetbrains.kotlin.cli.jvm.compiler.JetCoreEnvironment
+import org.jetbrains.kotlin.config.CommonConfigurationKeys
+import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.lexer.JetTokens
+import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.types.Variance
+import retrofit.RestAdapter
 import retrofit.http.GET
 import retrofit.http.Query
-import com.intellij.openapi.Disposable
-import org.jetbrains.kotlin.config.CompilerConfiguration
-import org.jetbrains.kotlin.config.CommonConfigurationKeys
-import org.jetbrains.kotlin.cli.jvm.compiler.JetCoreEnvironment
-import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
-import com.intellij.openapi.util.Disposer
-import com.intellij.psi.PsiErrorElement
-import org.jetbrains.kotlin.psi.JetClass
-import org.jetbrains.kotlin.psi.JetDelegatorByExpressionSpecifier
-import retrofit.RestAdapter
 import java.io.File
-import org.jetbrains.kotlin.psi.JetFunctionLiteralExpression
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiDocumentManager
-import org.jetbrains.kotlin.psi.JetNamedFunction
-import com.intellij.psi.util.PsiTreeUtil
-import org.jetbrains.kotlin.psi.JetBreakExpression
-import org.jetbrains.kotlin.psi.JetLabeledExpression
-import org.jetbrains.kotlin.psi.JetContinueExpression
-import org.jetbrains.kotlin.psi.JetReturnExpression
-import org.jetbrains.kotlin.psi.JetWhenExpression
-import org.jetbrains.kotlin.psi.JetWhenConditionInRange
-import org.jetbrains.kotlin.psi.JetWhileExpression
-import org.jetbrains.kotlin.psi.JetDoWhileExpression
-import org.jetbrains.kotlin.psi.JetObjectDeclaration
-import org.jetbrains.kotlin.psi.JetProperty
-import org.jetbrains.kotlin.psi.JetEnumEntry
-import org.jetbrains.kotlin.psi.JetTypeParameter
-import org.jetbrains.kotlin.types.Variance
-import org.jetbrains.kotlin.psi.JetTypeProjection
-import org.jetbrains.kotlin.psi.JetProjectionKind
-import org.jetbrains.kotlin.psi.JetBinaryExpression
-import org.jetbrains.kotlin.lexer.JetTokens
 
 data class Repo(val full_name: String, val git_url: String)
 
@@ -97,6 +78,7 @@ class Korpus(val baseDir: String) {
             println("Repo clone failed: exit code ${result}")
             return false
         }
+        Thread.sleep(15000)
         return true
     }
 
@@ -107,6 +89,7 @@ class Korpus(val baseDir: String) {
         if (result != 0) {
             println("Repo update failed: exit code ${result}")
         }
+        Thread.sleep(5000)
     }
 }
 
@@ -145,7 +128,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val delegationBySpecifiers = FeatureUsageCounter("'by' delegations", !statsOnly)
     val classes = FeatureUsageCounter("Classes")
     val innerClasses = FeatureUsageCounter("Inner classes")
-    val classObjects = FeatureUsageCounter("Class objects")
+    val companionObjects = FeatureUsageCounter("Companion objects")
     val objects = FeatureUsageCounter("Object declarations")
     val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
     val enums = FeatureUsageCounter("Enum classes")
@@ -175,6 +158,8 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val typeArgumentsWithVariance = FeatureUsageCounter("Type arguments with variance")
     val typeArgumentsWithStar = FeatureUsageCounter("Type arguments with <*>")
     val rangeOperators = FeatureUsageCounter("Range operators")
+    val typesAfterColon = FeatureUsageCounter("Types after colon")
+    val backingFields = FeatureUsageCounter("Backing fields")
 
     fun analyzeRepository(rootPath: String) {
         currentRepo = rootPath
@@ -209,9 +194,6 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         if (klass.isInner()) {
             innerClasses.increment(klass)
         }
-        if (klass.getClassObject() != null) {
-            classObjects.increment(klass.getClassObject())
-        }
         if (klass.getPrimaryConstructorModifierList() != null) {
             primaryConstructorVisibility.increment(klass)
         }
@@ -236,6 +218,9 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         objects.increment(declaration)
         if (declaration.isTopLevel()) {
             topLevelObjects.increment(declaration)
+        }
+        if (declaration.isCompanion()) {
+            companionObjects.increment(declaration)
         }
     }
 
@@ -349,6 +334,20 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         }
     }
 
+    override fun visitBinaryWithTypeRHSExpression(expression: JetBinaryExpressionWithTypeRHS) {
+        super.visitBinaryWithTypeRHSExpression(expression)
+        if (expression.getOperationReference().getText() == ":") {
+            typesAfterColon.increment(expression)
+        }
+    }
+
+    override fun visitElement(element: PsiElement) {
+        super.visitElement(element)
+        if (element.getNode().getElementType() == JetTokens.FIELD_IDENTIFIER) {
+            backingFields.increment(element)
+        }
+    }
+
     fun report() {
         println("Repositories analyzed: $repositoriesAnalyzed")
         println("Files analyzed: $filesAnalyzed")
@@ -356,7 +355,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         syntaxErrors.report()
         delegationBySpecifiers.report()
         classes.report()
-        classObjects.report()
+        companionObjects.report()
         primaryConstructorVisibility.report()
         innerClasses.report()
         objects.report()
@@ -387,6 +386,8 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         typeArgumentsWithVariance.report()
         typeArgumentsWithStar.report()
         rangeOperators.report()
+        typesAfterColon.report()
+        backingFields.report()
     }
 }
 
