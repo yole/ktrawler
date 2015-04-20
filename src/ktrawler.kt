@@ -52,11 +52,11 @@ class GithubRepositoryCollector() {
 }
 
 class Korpus(val baseDir: String) {
-    fun update(callback: (String) -> Boolean) {
+    fun update(local: Boolean, callback: (String) -> Boolean) {
         val collector = GithubRepositoryCollector()
         collector.processAllKotlinRepositories { url, current, total ->
             print("[$current/$total] ")
-            cloneOrUpdateRepository(url) && callback(pathTo(url).getPath())
+            (local || cloneOrUpdateRepository(url)) && callback(pathTo(url).getPath())
         }
     }
 
@@ -132,7 +132,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val delegationBySpecifiers = FeatureUsageCounter("'by' delegations", !statsOnly)
     val classes = FeatureUsageCounter("Classes")
     val innerClasses = FeatureUsageCounter("Inner classes")
-    val innerClassesWithOuterTypeParameters = FeatureUsageCounter("Inner classes with outer type parameters")
+    val innerClassesWithOuterTypeParameters = FeatureUsageCounter("Inner classes with outer type parameters", !statsOnly)
     val companionObjects = FeatureUsageCounter("Companion objects")
     val objects = FeatureUsageCounter("Object declarations")
     val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
@@ -412,12 +412,13 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
 
 fun main(args: Array<String>) {
     if (args.size() == 0) {
-        println("Usage: ktrawler <corpus-directory-path> [-stats-only] [<max-repo-count>]")
+        println("Usage: ktrawler <corpus-directory-path> [-local] [-stats-only] [<max-repo-count>]")
         return
     }
     val korpus = Korpus(args[0])
     var arg = 1
-    val statsOnly = if (args.size() > 1 && args[1] == "-stats-only") { arg++; true } else false
+    val local = if (args.size() > 1 && args[1] == "-local") { arg++; true} else false
+    val statsOnly = if (args.size() > 1 && args[arg] == "-stats-only") { arg++; true } else false
     val maxCount = if (args.size() > arg) Integer.parseInt(args[arg]) else 1000000
     val ktrawler = Ktrawler(statsOnly)
     var reposProcessed = 0
@@ -428,7 +429,7 @@ fun main(args: Array<String>) {
     else
         listOf()
 
-    korpus.update() { repoPath ->
+    korpus.update(local) { repoPath ->
         println("Analyzing repository ${repoPath}")
         if (!excludedRepoList.any { repoPath.endsWith("/" + it) }) {
             ktrawler.analyzeRepository(repoPath)
