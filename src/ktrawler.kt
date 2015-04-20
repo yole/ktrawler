@@ -7,9 +7,10 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiErrorElement
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
-import org.jetbrains.kotlin.cli.jvm.compiler.JetCoreEnvironment
+import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.config.addKotlinSourceRoot
 import org.jetbrains.kotlin.lexer.JetTokens
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.types.Variance
@@ -33,16 +34,18 @@ class GithubRepositoryCollector() {
         .build()
     val github = restAdapter.create(javaClass<Github>())
 
-    fun processAllKotlinRepositories(callback: (Repo) -> Boolean) {
+    fun processAllKotlinRepositories(callback: (Repo, Int, Int) -> Boolean) {
         var currentPage = 1
         var totalCount = -1
         var processedCount = 0
+        var currentRepo = 0
         while (totalCount == -1 || processedCount < totalCount) {
             var repos = github.searchRepositories("language:kotlin", currentPage++, 100)
             totalCount = repos.total_count
             processedCount += repos.items.size()
             for (it in repos.items) {
-                if (!callback(it)) return
+                currentRepo++
+                if (!callback(it, currentRepo, totalCount)) return
             }
         }
     }
@@ -51,8 +54,9 @@ class GithubRepositoryCollector() {
 class Korpus(val baseDir: String) {
     fun update(callback: (String) -> Boolean) {
         val collector = GithubRepositoryCollector()
-        collector.processAllKotlinRepositories {
-            cloneOrUpdateRepository(it) && callback(pathTo(it).getPath())
+        collector.processAllKotlinRepositories { url, current, total ->
+            print("[$current/$total] ")
+            cloneOrUpdateRepository(url) && callback(pathTo(url).getPath())
         }
     }
 
@@ -128,6 +132,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val delegationBySpecifiers = FeatureUsageCounter("'by' delegations", !statsOnly)
     val classes = FeatureUsageCounter("Classes")
     val innerClasses = FeatureUsageCounter("Inner classes")
+    val innerClassesWithOuterTypeParameters = FeatureUsageCounter("Inner classes with outer type parameters")
     val companionObjects = FeatureUsageCounter("Companion objects")
     val objects = FeatureUsageCounter("Object declarations")
     val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
@@ -169,8 +174,8 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
             }
         }
         val configuration = CompilerConfiguration()
-        configuration.add(CommonConfigurationKeys.SOURCE_ROOTS_KEY, rootPath)
-        val environment = JetCoreEnvironment.createForProduction(root, configuration, EnvironmentConfigFiles.JVM_CONFIG_FILES)
+        configuration.addKotlinSourceRoot(rootPath)
+        val environment = KotlinCoreEnvironment.createForProduction(root, configuration, EnvironmentConfigFiles.JVM_CONFIG_FILES)
         environment.getSourceFiles().forEach {
             if ("/testData/" !in it.getVirtualFile().getPath()) {
                 filesAnalyzed++
@@ -193,6 +198,9 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         classes.increment(klass)
         if (klass.isInner()) {
             innerClasses.increment(klass)
+            if (klass.hasOuterTypeParameters()) {
+                innerClassesWithOuterTypeParameters.increment(klass)
+            }
         }
         if (klass.getPrimaryConstructorModifierList() != null) {
             primaryConstructorVisibility.increment(klass)
@@ -202,6 +210,16 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
             if (klass.getPrimaryConstructorParameters().size() > 0) {
                 enumsWithConstructorParameters.increment(klass)
             }
+        }
+    }
+
+    private fun JetClass.hasOuterTypeParameters(): Boolean {
+        var cls = this
+        while (true) {
+            val parent = PsiTreeUtil.getParentOfType(cls, javaClass<JetClass>(), true)
+            if (parent == null) return false
+            if (parent.getTypeParameters().isNotEmpty()) return true
+            cls = parent
         }
     }
 
@@ -358,6 +376,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         companionObjects.report()
         primaryConstructorVisibility.report()
         innerClasses.report()
+        innerClassesWithOuterTypeParameters.report()
         objects.report()
         topLevelObjects.report()
         enums.report()
