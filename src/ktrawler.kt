@@ -418,7 +418,7 @@ fun main(args: Array<String>) {
     val korpus = Korpus(args[0])
     var arg = 1
     val local = if (args.size() > 1 && args[1] == "-local") { arg++; true} else false
-    val statsOnly = if (args.size() > 1 && args[arg] == "-stats-only") { arg++; true } else false
+    val statsOnly = if (args.size() > arg && args[arg] == "-stats-only") { arg++; true } else false
     val maxCount = if (args.size() > arg) Integer.parseInt(args[arg]) else 1000000
     val ktrawler = Ktrawler(statsOnly)
     var reposProcessed = 0
