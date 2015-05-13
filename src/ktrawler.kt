@@ -138,7 +138,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
     val enums = FeatureUsageCounter("Enum classes")
     val enumsWithConstructorParameters = FeatureUsageCounter("Enum classes with constructor parameters")
-    val enumsWithEntriesAndMembersMixed = FeatureUsageCounter("Enum classes with entries and members mixed")
+    val enumsWithEntriesAndMembersMixed = FeatureUsageCounter("Enum classes with entries and members mixed", !statsOnly)
     val enumEntries = FeatureUsageCounter("Enum entries")
     val enumEntriesWithBody = FeatureUsageCounter("Enum entries with body")
     val functions = FeatureUsageCounter("Functions")
