@@ -138,6 +138,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
     val topLevelObjects = FeatureUsageCounter("Top-level object declarations")
     val enums = FeatureUsageCounter("Enum classes")
     val enumsWithConstructorParameters = FeatureUsageCounter("Enum classes with constructor parameters")
+    val enumsWithEntriesAndMembersMixed = FeatureUsageCounter("Enum classes with entries and members mixed")
     val enumEntries = FeatureUsageCounter("Enum entries")
     val enumEntriesWithBody = FeatureUsageCounter("Enum entries with body")
     val functions = FeatureUsageCounter("Functions")
@@ -193,6 +194,19 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         syntaxErrors.increment(element)
     }
 
+    private fun JetClass.hasEnumEntriesAndMembersMixed(): Boolean {
+        var insideEntries = true
+        for (declaration in getDeclarations()) {
+            if (declaration is JetEnumEntry) {
+                if (!insideEntries) return true
+            }
+            else {
+                insideEntries = false
+            }
+        }
+        return false
+    }
+
     override fun visitClass(klass: JetClass) {
         super.visitClass(klass)
         classes.increment(klass)
@@ -209,6 +223,9 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
             enums.increment(klass)
             if (klass.getPrimaryConstructorParameters().size() > 0) {
                 enumsWithConstructorParameters.increment(klass)
+            }
+            if (klass.hasEnumEntriesAndMembersMixed()) {
+                enumsWithEntriesAndMembersMixed.increment(klass)
             }
         }
     }
@@ -381,6 +398,7 @@ class Ktrawler(val statsOnly: Boolean): JetTreeVisitorVoid() {
         topLevelObjects.report()
         enums.report()
         enumsWithConstructorParameters.report()
+        enumsWithEntriesAndMembersMixed.report()
         enumEntries.report()
         enumEntriesWithBody.report()
         functions.report()
